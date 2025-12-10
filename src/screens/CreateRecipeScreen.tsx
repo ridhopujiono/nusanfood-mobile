@@ -8,10 +8,11 @@ import {
   Dimensions,
   Alert,
   Platform,
+  PermissionsAndroid,
+  TouchableOpacity,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
-  Appbar,
   useTheme,
   TextInput as PaperTextInput,
   Button,
@@ -19,12 +20,16 @@ import {
   Text,
   Divider,
   Surface,
+  TouchableRipple,
 } from 'react-native-paper';
+import Modal from 'react-native-modal';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation } from '@react-navigation/native';
 import {
   launchImageLibrary,
+  launchCamera,
   ImageLibraryOptions,
+  CameraOptions,
   Asset,
 } from 'react-native-image-picker';
 
@@ -77,31 +82,140 @@ export default function CreateRecipeScreen() {
     steps: [{ instruction: '' }],
   });
 
-  const pickImage = async () => {
+  // bottom sheet state
+  const [pickerVisible, setPickerVisible] = useState(false);
+
+  // helper: request permissions on Android
+  async function requestAndroidImagePermission(): Promise<boolean> {
     try {
-      const options: ImageLibraryOptions = {
-        mediaType: 'photo',
-        selectionLimit: 1,
-        includeBase64: false,
-      };
+      if (Platform.Version >= 33) {
+        // Android 13+
+        const granted = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.READ_MEDIA_IMAGES,
+          {
+            title: 'Permission to access images',
+            message: 'We need access to your images to upload recipe photos.',
+            buttonPositive: 'OK',
+            buttonNegative: 'Cancel',
+          },
+        );
+        return granted === PermissionsAndroid.RESULTS.GRANTED;
+      } else {
+        const granted = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE,
+          {
+            title: 'Permission to access storage',
+            message: 'We need access to your storage to choose pictures.',
+            buttonPositive: 'OK',
+            buttonNegative: 'Cancel',
+          },
+        );
+        return granted === PermissionsAndroid.RESULTS.GRANTED;
+      }
+    } catch (err) {
+      console.warn('requestAndroidImagePermission error', err);
+      return false;
+    }
+  }
 
+  async function requestAndroidCameraPermission(): Promise<boolean> {
+    try {
+      const granted = await PermissionsAndroid.request(
+        PermissionsAndroid.PERMISSIONS.CAMERA,
+        {
+          title: 'Permission to use camera',
+          message: 'We need access to your camera to take photos.',
+          buttonPositive: 'OK',
+          buttonNegative: 'Cancel',
+        },
+      );
+      return granted === PermissionsAndroid.RESULTS.GRANTED;
+    } catch (err) {
+      console.warn('requestAndroidCameraPermission error', err);
+      return false;
+    }
+  }
+
+  // pick from gallery
+  const pickFromGallery = async () => {
+    setPickerVisible(false);
+    // Android permission
+    if (Platform.OS === 'android') {
+      const ok = await requestAndroidImagePermission();
+      if (!ok) {
+        Alert.alert(
+          'Permission denied',
+          'Cannot access gallery without permission.',
+        );
+        return;
+      }
+    }
+
+    const options: ImageLibraryOptions = {
+      mediaType: 'photo',
+      selectionLimit: 1,
+      includeBase64: false,
+    };
+
+    try {
       const res = await launchImageLibrary(options);
-
+      console.log('launchImageLibrary result', res);
       if (res.didCancel) return;
       if (res.errorCode) {
         Alert.alert('Error', res.errorMessage || 'Unable to pick image');
         return;
       }
       const asset: Asset | undefined = res.assets && res.assets[0];
+      console.log('picked asset', asset);
       if (asset && asset.uri) {
         setRecipeData(s => ({ ...s, image: asset.uri! }));
       }
     } catch (err) {
-      console.warn('pickImage error', err);
+      console.warn('pickFromGallery error', err);
       Alert.alert('Error', 'Could not open image library');
     }
   };
 
+  // take a photo from camera
+  const takePhoto = async () => {
+    setPickerVisible(false);
+    if (Platform.OS === 'android') {
+      const ok = await requestAndroidCameraPermission();
+      if (!ok) {
+        Alert.alert(
+          'Permission denied',
+          'Cannot use camera without permission.',
+        );
+        return;
+      }
+    }
+
+    const options: CameraOptions = {
+      mediaType: 'photo',
+      saveToPhotos: true,
+      includeBase64: false,
+    };
+
+    try {
+      const res = await launchCamera(options);
+      console.log('launchCamera result', res);
+      if (res.didCancel) return;
+      if (res.errorCode) {
+        Alert.alert('Error', res.errorMessage || 'Unable to take photo');
+        return;
+      }
+      const asset: Asset | undefined = res.assets && res.assets[0];
+      console.log('captured asset', asset);
+      if (asset && asset.uri) {
+        setRecipeData(s => ({ ...s, image: asset.uri! }));
+      }
+    } catch (err) {
+      console.warn('takePhoto error', err);
+      Alert.alert('Error', 'Could not open camera');
+    }
+  };
+
+  // existing form helpers (ingredients/steps)
   const addIngredient = () =>
     setRecipeData(s => ({
       ...s,
@@ -178,10 +292,6 @@ export default function CreateRecipeScreen() {
   useLayoutEffect(() => {
     navigation.setOptions({
       title: `Create Recipe (${currentStep}/5)`,
-      headerStyle: {
-        backgroundColor: theme.colors.primary, // hijau matang
-      },
-      headerTintColor: theme.colors.onPrimary, // warna ikon & teks
       headerTitleStyle: {
         fontWeight: '600',
       },
@@ -209,7 +319,7 @@ export default function CreateRecipeScreen() {
         {currentStep === 1 && (
           <View style={styles.stepContent}>
             <Text variant="headlineSmall" style={{ marginBottom: 8 }}>
-              Upload Recipe Photo
+              Unggah Foto Resep Anda
             </Text>
             <Text
               variant="bodyMedium"
@@ -218,17 +328,20 @@ export default function CreateRecipeScreen() {
                 marginBottom: 12,
               }}
             >
-              Choose a beautiful photo of your finished dish
+              Pilih foto terbaik makanan yang telah anda buat!.
             </Text>
 
-            <TouchableCard onPress={pickImage} imageUri={recipeData.image} />
+            <TouchableCard
+              onPress={() => setPickerVisible(true)}
+              imageUri={recipeData.image}
+            />
           </View>
         )}
 
         {currentStep === 2 && (
           <View style={styles.stepContent}>
             <Text variant="headlineSmall" style={{ marginBottom: 8 }}>
-              Recipe Information
+              Informasi Resep
             </Text>
             <Text
               variant="bodyMedium"
@@ -237,11 +350,11 @@ export default function CreateRecipeScreen() {
                 marginBottom: 12,
               }}
             >
-              Tell us about your recipe
+              Beritahu kami tentang resep anda!
             </Text>
 
             <PaperTextInput
-              label="Recipe Title *"
+              label="Judul Resep *"
               value={recipeData.title}
               onChangeText={t => setRecipeData(s => ({ ...s, title: t }))}
               style={styles.input}
@@ -249,7 +362,7 @@ export default function CreateRecipeScreen() {
             />
 
             <PaperTextInput
-              label="Description"
+              label="Deskripsi"
               value={recipeData.description}
               onChangeText={t => setRecipeData(s => ({ ...s, description: t }))}
               style={[styles.input, styles.textArea]}
@@ -260,7 +373,7 @@ export default function CreateRecipeScreen() {
 
             <View style={styles.row}>
               <PaperTextInput
-                label="Cooking Time (min) *"
+                label="Durasi Memasak (menit) *"
                 value={recipeData.cookingTime}
                 onChangeText={t =>
                   setRecipeData(s => ({ ...s, cookingTime: t }))
@@ -270,7 +383,7 @@ export default function CreateRecipeScreen() {
                 keyboardType="numeric"
               />
               <PaperTextInput
-                label="Servings *"
+                label="Jumlah Porsi *"
                 value={recipeData.servings}
                 onChangeText={t => setRecipeData(s => ({ ...s, servings: t }))}
                 style={[styles.input, styles.halfWidth]}
@@ -284,7 +397,7 @@ export default function CreateRecipeScreen() {
         {currentStep === 3 && (
           <View style={styles.stepContent}>
             <Text variant="headlineSmall" style={{ marginBottom: 8 }}>
-              Ingredients
+              Bahan
             </Text>
             <Text
               variant="bodyMedium"
@@ -293,21 +406,21 @@ export default function CreateRecipeScreen() {
                 marginBottom: 12,
               }}
             >
-              Add ingredients with quantities
+              Tambahkan bahan-bahan yang dibutuhkan!
             </Text>
 
             {recipeData.ingredients.map((ingredient, index) => (
               <View key={index} style={styles.ingredientRow}>
                 <View style={styles.ingredientInputs}>
                   <PaperTextInput
-                    placeholder="Ingredient name"
+                    placeholder="Nama Bahan"
                     value={ingredient.name}
                     onChangeText={t => updateIngredient(index, 'name', t)}
                     style={[styles.input, styles.ingredientName]}
                     mode="outlined"
                   />
                   <PaperTextInput
-                    placeholder="Qty"
+                    placeholder="Jumlah"
                     value={ingredient.quantity}
                     onChangeText={t => updateIngredient(index, 'quantity', t)}
                     style={[styles.input, styles.ingredientQuantity]}
@@ -336,7 +449,7 @@ export default function CreateRecipeScreen() {
             ))}
 
             <Button mode="outlined" onPress={addIngredient} icon="plus">
-              Add Ingredient
+             Bahan Lainya
             </Button>
           </View>
         )}
@@ -344,7 +457,7 @@ export default function CreateRecipeScreen() {
         {currentStep === 4 && (
           <View style={styles.stepContent}>
             <Text variant="headlineSmall" style={{ marginBottom: 8 }}>
-              Cooking Steps
+              Langkah Langkah
             </Text>
             <Text
               variant="bodyMedium"
@@ -353,7 +466,7 @@ export default function CreateRecipeScreen() {
                 marginBottom: 12,
               }}
             >
-              Describe the preparation steps
+              Apa saja langkah-langkah untuk membuat resep ini?
             </Text>
 
             {recipeData.steps.map((step, index) => (
@@ -366,7 +479,7 @@ export default function CreateRecipeScreen() {
 
                 <View style={styles.stepInputContainer}>
                   <PaperTextInput
-                    placeholder={`Step ${index + 1} instruction`}
+                    placeholder={`Langkah ${index + 1} ...`}
                     value={step.instruction}
                     onChangeText={t => updateStep(index, t)}
                     mode="outlined"
@@ -389,7 +502,7 @@ export default function CreateRecipeScreen() {
             ))}
 
             <Button mode="outlined" onPress={addStep} icon="plus">
-              Add Step
+              Langkah Lainya
             </Button>
           </View>
         )}
@@ -397,7 +510,7 @@ export default function CreateRecipeScreen() {
         {currentStep === 5 && (
           <View style={styles.stepContent}>
             <Text variant="headlineSmall" style={{ marginBottom: 8 }}>
-              Preview & Publish
+              Preview Resep & Publish
             </Text>
             <Text
               variant="bodyMedium"
@@ -406,7 +519,7 @@ export default function CreateRecipeScreen() {
                 marginBottom: 12,
               }}
             >
-              Review your recipe before publishing
+              Apakah resep ini sudah sesuai?
             </Text>
 
             <Surface style={styles.previewCard}>
@@ -414,25 +527,29 @@ export default function CreateRecipeScreen() {
                 <Image
                   source={{ uri: recipeData.image }}
                   style={styles.previewImage}
+                  resizeMode="cover"
+                  onError={e =>
+                    console.warn('preview image error', e.nativeEvent)
+                  }
                 />
               )}
               <View style={styles.previewContent}>
                 <Text variant="titleLarge" style={styles.previewTitle}>
-                  {recipeData.title || 'Untitled Recipe'}
+                  {recipeData.title || 'Belum ada judul'}
                 </Text>
                 <Text variant="labelLarge" style={styles.previewMeta}>
-                  {recipeData.cookingTime} min • {recipeData.servings} servings
+                  {recipeData.cookingTime} menit • {recipeData.servings} porsi
                 </Text>
                 <Text variant="bodyMedium" style={styles.previewDescription}>
-                  {recipeData.description || 'No description'}
+                  {recipeData.description || 'Belum ada deskripsi'}
                 </Text>
                 <Divider style={{ marginVertical: 8 }} />
                 <Text variant="labelLarge">
                   {recipeData.ingredients.filter(i => i.name).length}{' '}
-                  Ingredients
+                  Bahan
                 </Text>
                 <Text variant="labelLarge">
-                  {recipeData.steps.filter(s => s.instruction).length} Steps
+                  {recipeData.steps.filter(s => s.instruction).length} Langkah
                 </Text>
               </View>
             </Surface>
@@ -447,7 +564,7 @@ export default function CreateRecipeScreen() {
             onPress={handleBack}
             style={styles.backButton}
           >
-            Back
+            Kembali
           </Button>
         )}
 
@@ -458,7 +575,7 @@ export default function CreateRecipeScreen() {
             disabled={!canProceed()}
             style={[styles.nextButton, !canProceed() && styles.disabledButton]}
           >
-            Next
+            Selanjutnya
           </Button>
         ) : (
           <Button
@@ -470,12 +587,62 @@ export default function CreateRecipeScreen() {
           </Button>
         )}
       </View>
+
+      {/* Bottom sheet / action sheet */}
+      <Modal
+        isVisible={pickerVisible}
+        onBackdropPress={() => setPickerVisible(false)}
+        onBackButtonPress={() => setPickerVisible(false)}
+        style={{ justifyContent: 'flex-end', margin: 0 }}
+        useNativeDriver={true}
+        useNativeDriverForBackdrop={true}
+        animationIn="slideInUp"
+        animationOut="slideOutDown"
+        backdropTransitionOutTiming={0}
+        coverScreen={true}
+        avoidKeyboard={true}
+        propagateSwipe={true}
+      >
+        <View style={styles.bottomSheet}>
+          <Button
+            mode="text"
+            icon="camera"
+            onPress={takePhoto}
+            contentStyle={styles.modalButtonContent}
+            style={styles.modalButton}
+            labelStyle={styles.modalLabel}
+          >
+            Take Photo
+          </Button>
+
+          <Button
+            mode="text"
+            icon="image"
+            onPress={pickFromGallery}
+            contentStyle={styles.modalButtonContent}
+            style={styles.modalButton}
+            labelStyle={styles.modalLabel}
+          >
+            Choose from Gallery
+          </Button>
+
+          <Button
+            mode="text"
+            onPress={() => setPickerVisible(false)}
+            contentStyle={styles.modalButtonContent}
+            style={styles.modalCancel}
+            labelStyle={styles.modalCancelLabel}
+          >
+            Cancel
+          </Button>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
 
 /**
- * Small helper component for image upload area using Paper surface for consistent look
+ * TouchableCard: uses TouchableOpacity so Image can have explicit size.
  */
 function TouchableCard({
   onPress,
@@ -484,25 +651,33 @@ function TouchableCard({
   onPress: () => void;
   imageUri?: string;
 }) {
+  const H = width - 40;
+
   return (
-    <Button
-      mode="outlined"
-      onPress={onPress}
-      style={styles.imageUploadBox}
-      contentStyle={{ height: width - 40 }}
+    <TouchableOpacity
+      onPress={() => {
+        console.log('>>> upload area pressed');
+        onPress();
+      }}
+      activeOpacity={0.85}
+      style={[styles.imageUploadBox, { height: H, borderRadius: 8 }]}
+      hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
     >
       {imageUri ? (
-        <Image source={{ uri: imageUri }} style={styles.uploadedImage} />
+        <Image
+          source={{ uri: imageUri }}
+          style={styles.uploadedImage}
+          resizeMode="cover"
+        />
       ) : (
         <View style={styles.uploadPlaceholder}>
           <IconButton icon="camera" size={36} iconColor="#999" />
           <Text style={styles.uploadText}>Tap to upload photo</Text>
         </View>
       )}
-    </Button>
+    </TouchableOpacity>
   );
 }
-
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
   progressBar: {
@@ -526,12 +701,14 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   stepDescription: { fontSize: 15, color: '#666', marginBottom: 12 },
+  // <-- borderRadius default changed to 8
   imageUploadBox: {
     width: '100%',
-    borderRadius: 16,
+    borderRadius: 8,
     backgroundColor: '#f5f5f5',
     overflow: 'hidden',
     justifyContent: 'center',
+    alignItems: 'center',
   },
   uploadPlaceholder: {
     flex: 1,
@@ -540,7 +717,7 @@ const styles = StyleSheet.create({
   },
   uploadText: { fontSize: 16, fontWeight: '600', color: '#999', marginTop: 12 },
   uploadedImage: { width: '100%', height: '100%' },
-  input: { marginBottom: 12 },
+  input: { marginBottom: 12, paddingTop: 10 },
   textArea: { minHeight: 100 },
   row: { flexDirection: 'row', gap: 12 },
   halfWidth: { flex: 1 },
@@ -555,7 +732,7 @@ const styles = StyleSheet.create({
   ingredientUnit: { width: 80 },
   iconBtn: { margin: 0 },
   iconBtnAbsolute: { position: 'absolute', top: 8, right: 8 },
-  stepRow: { flexDirection: 'row', marginBottom: 12 },
+  stepRow: { flexDirection: 'row', marginBottom: 12, gap: 12 },
   stepNumberBadge: {
     width: 40,
     height: 40,
@@ -566,7 +743,7 @@ const styles = StyleSheet.create({
   },
   stepNumberText: { color: '#fff' },
   stepInputContainer: { flex: 1 },
-  previewCard: { borderRadius: 12, overflow: 'hidden', marginTop: 8 },
+  previewCard: { borderRadius: 8, overflow: 'hidden', marginTop: 8 },
   previewImage: { width: '100%', height: 220 },
   previewContent: { padding: 16 },
   previewTitle: { fontSize: 20, fontWeight: '700', marginBottom: 6 },
@@ -581,8 +758,53 @@ const styles = StyleSheet.create({
     borderTopColor: '#f0f0f0',
     backgroundColor: '#fff',
   },
-  backButton: { flex: 1 },
-  nextButton: { flex: 2 },
-  publishButton: { flex: 2 },
+  backButton: { flex: 1, borderRadius: 8 },
+  nextButton: { flex: 2, borderRadius: 8 },
+  publishButton: { flex: 2, borderRadius: 8 },
   disabledButton: { backgroundColor: '#e0e0e0' },
+
+  /* modal styles */
+  modalContainer: {
+    justifyContent: 'flex-end',
+    margin: 0,
+  },
+  modalContent: {
+    backgroundColor: '#fff',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderTopLeftRadius: 12,
+    borderTopRightRadius: 12,
+  },
+  bottomSheet: {
+    backgroundColor: '#fff',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    // force to bottom and above nav bar
+    paddingBottom: Platform.OS === 'android' ? 24 : 12,
+    // add elevation/zIndex to ensure on top
+    elevation: 20,
+    zIndex: 9999,
+  },
+
+  modalButton: {
+    justifyContent: 'flex-start',
+    paddingVertical: 6,
+  },
+  modalButtonContent: {
+    height: 48,
+  },
+  modalLabel: {
+    fontSize: 16,
+    textAlign: 'left',
+  },
+  modalCancel: {
+    marginTop: 8,
+    paddingVertical: 10,
+  },
+  modalCancelLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
 });
