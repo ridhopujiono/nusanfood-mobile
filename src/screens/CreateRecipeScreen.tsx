@@ -583,7 +583,7 @@ export default function CreateRecipeScreen() {
             onPress={handlePublish}
             style={styles.publishButton}
           >
-            Publish Recipe
+            Publish
           </Button>
         )}
       </View>
@@ -612,7 +612,7 @@ export default function CreateRecipeScreen() {
             style={styles.modalButton}
             labelStyle={styles.modalLabel}
           >
-            Take Photo
+            Kamera
           </Button>
 
           <Button
@@ -623,7 +623,7 @@ export default function CreateRecipeScreen() {
             style={styles.modalButton}
             labelStyle={styles.modalLabel}
           >
-            Choose from Gallery
+            Pilih Gambar
           </Button>
 
           <Button
@@ -633,7 +633,7 @@ export default function CreateRecipeScreen() {
             style={styles.modalCancel}
             labelStyle={styles.modalCancelLabel}
           >
-            Cancel
+            Kembali
           </Button>
         </View>
       </Modal>
