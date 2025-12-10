@@ -45,6 +45,7 @@ interface Ingredient {
 
 interface RecipeStep {
   instruction: string;
+  photo?: string;
 }
 
 interface RecipeData {
@@ -72,6 +73,9 @@ export default function CreateRecipeScreen() {
   const navigation = useNavigation<NavigationProp>();
 
   const [currentStep, setCurrentStep] = useState<Step>(1);
+  const [selectedStepIndex, setSelectedStepIndex] = useState<number | null>(
+    null,
+  );
   const [recipeData, setRecipeData] = useState<RecipeData>({
     image: '',
     title: '',
@@ -168,6 +172,16 @@ export default function CreateRecipeScreen() {
       const asset: Asset | undefined = res.assets && res.assets[0];
       console.log('picked asset', asset);
       if (asset && asset.uri) {
+        if (selectedStepIndex !== null) {
+          setRecipeData(s => {
+            const steps = [...s.steps];
+            steps[selectedStepIndex].photo = asset.uri!;
+            return { ...s, steps };
+          });
+
+          setSelectedStepIndex(null);
+          return; // <-- jangan lanjut ke foto utama
+        }
         setRecipeData(s => ({ ...s, image: asset.uri! }));
       }
     } catch (err) {
@@ -207,6 +221,16 @@ export default function CreateRecipeScreen() {
       const asset: Asset | undefined = res.assets && res.assets[0];
       console.log('captured asset', asset);
       if (asset && asset.uri) {
+        if (selectedStepIndex !== null) {
+          setRecipeData(s => {
+            const steps = [...s.steps];
+            steps[selectedStepIndex].photo = asset.uri!;
+            return { ...s, steps };
+          });
+
+          setSelectedStepIndex(null);
+          return;
+        }
         setRecipeData(s => ({ ...s, image: asset.uri! }));
       }
     } catch (err) {
@@ -449,7 +473,7 @@ export default function CreateRecipeScreen() {
             ))}
 
             <Button mode="outlined" onPress={addIngredient} icon="plus">
-             Bahan Lainya
+              Bahan Lainya
             </Button>
           </View>
         )}
@@ -471,11 +495,31 @@ export default function CreateRecipeScreen() {
 
             {recipeData.steps.map((step, index) => (
               <View key={index} style={styles.stepRow}>
-                <Surface style={styles.stepNumberBadge}>
-                  <Text variant="titleSmall" style={styles.stepNumberText}>
-                    {index + 1}
-                  </Text>
-                </Surface>
+                <View style={styles.stepLeftColumn}>
+                  <Surface style={styles.stepNumberBadge}>
+                    <Text variant="titleSmall" style={styles.stepNumberText}>
+                      {index + 1}
+                    </Text>
+                  </Surface>
+
+                  <TouchableOpacity
+                    style={styles.stepPhotoButton}
+                    onPress={() => {
+                      // simpan index lalu buka modal picker
+                      setSelectedStepIndex(index);
+                      setPickerVisible(true);
+                    }}
+                  >
+                    {step.photo ? (
+                      <Image
+                        source={{ uri: step.photo }}
+                        style={styles.stepPhotoPreview}
+                      />
+                    ) : (
+                      <IconButton icon="camera" size={20} iconColor="#555" />
+                    )}
+                  </TouchableOpacity>
+                </View>
 
                 <View style={styles.stepInputContainer}>
                   <PaperTextInput
@@ -545,8 +589,7 @@ export default function CreateRecipeScreen() {
                 </Text>
                 <Divider style={{ marginVertical: 8 }} />
                 <Text variant="labelLarge">
-                  {recipeData.ingredients.filter(i => i.name).length}{' '}
-                  Bahan
+                  {recipeData.ingredients.filter(i => i.name).length} Bahan
                 </Text>
                 <Text variant="labelLarge">
                   {recipeData.steps.filter(s => s.instruction).length} Langkah
@@ -806,5 +849,25 @@ const styles = StyleSheet.create({
   modalCancelLabel: {
     fontSize: 16,
     fontWeight: '600',
+  },
+  stepLeftColumn: {
+    alignItems: 'center',
+    marginRight: 8,
+  },
+
+  stepPhotoButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 8,
+    backgroundColor: '#eee',
+    justifyContent: 'center',
+    alignItems: 'center',
+    overflow: 'hidden',
+    marginTop: 8,
+  },
+
+  stepPhotoPreview: {
+    width: '100%',
+    height: '100%',
   },
 });
