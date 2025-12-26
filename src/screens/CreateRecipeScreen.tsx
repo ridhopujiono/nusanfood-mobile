@@ -760,7 +760,7 @@ const styles = StyleSheet.create({
   },
   uploadText: { fontSize: 16, fontWeight: '600', color: '#999', marginTop: 12 },
   uploadedImage: { width: '100%', height: '100%' },
-  input: { marginBottom: 12, paddingTop: 10 },
+  // input: { marginBottom: 12 },
   textArea: { minHeight: 100 },
   row: { flexDirection: 'row', gap: 12 },
   halfWidth: { flex: 1 },
