@@ -1,7 +1,6 @@
-// src/screens/HomeScreen.tsx
 import React from 'react';
 import { View, StyleSheet } from 'react-native';
-import { FAB, Text, useTheme, Appbar } from 'react-native-paper';
+import { FAB, Text, useTheme } from 'react-native-paper';
 import { useNavigation } from '@react-navigation/native';
 
 export default function HomeScreen() {
@@ -10,12 +9,11 @@ export default function HomeScreen() {
 
   return (
     <View style={styles.container}>
-
       <View style={styles.center}>
-        <Text variant="titleLarge" style={{ color: theme.colors.text }}>
+        <Text variant="titleLarge" style={{ color: theme.colors.onBackground }}>
           Selamat datang
         </Text>
-        <Text style={{ marginTop: 8, color: theme.colors.placeholder }}>
+        <Text style={{ marginTop: 8, color: theme.colors.onSurfaceVariant }}>
           Halaman Home (kosong)
         </Text>
       </View>
@@ -23,9 +21,7 @@ export default function HomeScreen() {
       <FAB
         icon="plus"
         onPress={() => navigation.navigate('CreateRecipe' as never)}
-        style={[styles.fab, {
-          backgroundColor: theme.colors.primary,
-        }]}
+        style={[styles.fab, { backgroundColor: theme.colors.primary }]}
         color="#fff"
       />
     </View>
@@ -35,9 +31,5 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  fab: {
-    position: 'absolute',
-    right: 16,
-    bottom: 24,
-  },
+  fab: { position: 'absolute', right: 16, bottom: 24 },
 });
