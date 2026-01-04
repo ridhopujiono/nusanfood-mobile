@@ -84,5 +84,22 @@ function AuthStack() {
 
 export default function RootStack() {
   const { user } = useAuth();
-  return user ? <AppStack /> : <AuthStack />;
+
+  return (
+    <Stack.Navigator screenOptions={{ headerShown: false }}>
+      {user ? (
+        <>
+          <Stack.Screen name="AppTabs" component={AppTabs} />
+          <Stack.Screen
+            name="CreateRecipe"
+            component={CreateRecipeScreen}
+            options={{ headerShown: true, title: "Buat Resep" }}
+          />
+        </>
+      ) : (
+        <Stack.Screen name="Login" component={LoginScreen} />
+      )}
+    </Stack.Navigator>
+  );
 }
+
