@@ -1,5 +1,9 @@
 // src/screens/CreateRecipeScreen.tsx
-import React, { useLayoutEffect, useState } from 'react';
+import React, { useLayoutEffect, useState, useMemo } from "react"; // add useMemo
+import { Pressable } from "react-native"; // add FlatList, Pressable
+import { ActivityIndicator } from "react-native-paper"; // add
+import { useFoodsList } from "../api/queries"; // adjust path if needed
+import { useDebouncedValue } from "../hooks/useDebouncedValue";
 import {
   View,
   StyleSheet,
@@ -339,6 +343,8 @@ export default function CreateRecipeScreen() {
       <ScrollView
         style={styles.content}
         contentContainerStyle={{ paddingBottom: 16 }}
+        keyboardShouldPersistTaps="handled"
+        nestedScrollEnabled
       >
         {currentStep === 1 && (
           <View style={styles.stepContent}>
@@ -436,13 +442,11 @@ export default function CreateRecipeScreen() {
             {recipeData.ingredients.map((ingredient, index) => (
               <View key={index} style={styles.ingredientRow}>
                 <View style={styles.ingredientInputs}>
-                  <PaperTextInput
-                    placeholder="Nama Bahan"
+                  <IngredientNameAutocomplete
                     value={ingredient.name}
-                    onChangeText={t => updateIngredient(index, 'name', t)}
-                    style={[styles.input, styles.ingredientName]}
-                    mode="outlined"
+                    onChange={(t) => updateIngredient(index, "name", t)}
                   />
+
                   <PaperTextInput
                     placeholder="Jumlah"
                     value={ingredient.quantity}
@@ -721,6 +725,148 @@ function TouchableCard({
     </TouchableOpacity>
   );
 }
+
+type FoodItem = {
+  id?: number | string;
+  name?: string;
+  // add other fields if your API uses different naming
+};
+
+function pickServing(food: any) {
+  const servings = food?.servings ?? [];
+  if (!Array.isArray(servings) || servings.length === 0) return null;
+
+  const by100g = servings.find(
+    (s) => String(s?.serving_label).toLowerCase() === "100 g"
+  );
+
+  return by100g ?? servings[0];
+}
+
+function formatMacros(nutrition: any) {
+  if (!nutrition) return "";
+  const c = nutrition.calories ?? 0;
+  const p = nutrition.protein ?? 0;
+  const carb = nutrition.carbohydrate ?? 0;
+  const f = nutrition.fat ?? 0;
+  return `${c} kcal • P ${p}g • C ${carb}g • F ${f}g`;
+}
+
+function IngredientNameAutocomplete({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (text: string) => void;
+}) {
+  const theme = useTheme();
+  const { data, isLoading, error } = useFoodsList();
+
+  const [focused, setFocused] = useState(false);
+
+  // debounce typing
+  const debounced = useDebouncedValue(value, 600);
+
+  // normalize foods list from API response (try common shapes)
+  const foods: FoodItem[] = useMemo(() => {
+    const raw = data?.data ?? data?.foods ?? data?.items ?? data ?? [];
+    return Array.isArray(raw) ? raw : [];
+  }, [data]);
+
+  const suggestions = useMemo(() => {
+    const q = debounced.trim().toLowerCase();
+    if (q.length < 2) return [];
+
+    // simple local filter
+    return foods
+      .filter((f) => (f.name ?? "").toLowerCase().includes(q))
+      .slice(0, 8);
+  }, [foods, debounced]);
+
+  const showDropdown = focused && debounced.trim().length >= 2 && suggestions.length > 0;
+
+  return (
+    <View style={{ position: "relative", flex: 2, marginRight: 8 }}>
+      <PaperTextInput
+        placeholder="Nama Bahan"
+        value={value}
+        onChangeText={onChange}
+        onFocus={() => setFocused(true)}
+        onBlur={() => {
+          // delay so tap on dropdown registers
+          setTimeout(() => setFocused(false), 150);
+        }}
+        style={[styles.input, styles.ingredientName]}
+        mode="outlined"
+        right={
+          isLoading ? <PaperTextInput.Icon icon={() => <ActivityIndicator />} /> : undefined
+        }
+      />
+
+      {/* Dropdown */}
+      {showDropdown ? (
+        <View
+          style={[
+            styles.suggestBox,
+            {
+              backgroundColor: theme.colors.surface,
+              borderColor: theme.colors.outlineVariant ?? "#ddd",
+            },
+          ]}
+        >
+          <ScrollView
+            keyboardShouldPersistTaps="handled"
+            nestedScrollEnabled
+            style={{ maxHeight: 220 }}
+          >
+            {suggestions.map((item, idx) => {
+              const serving = pickServing(item);
+              const nutrition = serving?.nutrition;
+              const servingLabel = serving?.serving_label ?? "";
+              const macros = formatMacros(nutrition);
+
+              return (
+                <Pressable
+                  key={String(item.id ?? idx)}
+                  onPress={() => {
+                    onChange(item.name ?? "");
+                    setFocused(false);
+                  }}
+                  style={styles.suggestItem}
+                >
+                  <Text variant="bodyLarge" style={{ fontWeight: "600" }}>
+                    {item.name ?? "Unnamed"}
+                  </Text>
+
+                  {servingLabel ? (
+                    <Text variant="bodySmall" style={{ opacity: 0.7 }}>
+                      {servingLabel}
+                    </Text>
+                  ) : null}
+
+                  {macros ? (
+                    <Text variant="bodySmall" style={{ opacity: 0.7 }}>
+                      {macros}
+                    </Text>
+                  ) : null}
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        </View>
+      ) : null}
+
+
+      {/* Optional: show error below input */}
+      {focused && debounced.trim().length >= 2 && error ? (
+        <Text style={{ color: theme.colors.error, marginTop: 4 }} variant="bodySmall">
+          {(error as Error).message}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
   progressBar: {
@@ -786,6 +932,24 @@ const styles = StyleSheet.create({
   },
   stepNumberText: { color: '#fff' },
   stepInputContainer: { flex: 1 },
+  suggestBox: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    top: 60,        // adjust if your input height differs
+    maxHeight: 220,
+    borderWidth: 1,
+    borderRadius: 12,
+    overflow: "hidden",
+    elevation: 6,
+    zIndex: 9999,
+  },
+  suggestItem: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(0,0,0,0.06)",
+  },
   previewCard: { borderRadius: 8, overflow: 'hidden', marginTop: 8 },
   previewImage: { width: '100%', height: 220 },
   previewContent: { padding: 16 },
