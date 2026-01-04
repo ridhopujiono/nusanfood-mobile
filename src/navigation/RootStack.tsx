@@ -3,6 +3,7 @@ import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 
 import LoginScreen from "../screens/LoginScreen";
+import RegisterScreen from "../screens/RegisterScreen";
 import HomeScreen from "../screens/HomeScreen";
 import CreateRecipeScreen from "../screens/CreateRecipeScreen";
 import RecipesScreen from "../screens/RecipesScreen";
@@ -15,6 +16,7 @@ import MaterialCommunityIcons from "react-native-vector-icons/MaterialCommunityI
 
 export type RootStackParamList = {
   Login: undefined;
+  Register: undefined;
   AppTabs: undefined;
   CreateRecipe: undefined;
 };
@@ -97,8 +99,12 @@ export default function RootStack() {
           />
         </>
       ) : (
-        <Stack.Screen name="Login" component={LoginScreen} />
+        <>
+          <Stack.Screen name="Login" component={LoginScreen} />
+          <Stack.Screen name="Register" component={RegisterScreen} />
+        </>
       )}
+
     </Stack.Navigator>
   );
 }
