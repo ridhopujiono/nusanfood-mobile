@@ -3,38 +3,33 @@ import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/RootStack";
 import { View, StyleSheet, KeyboardAvoidingView, Platform } from "react-native";
-import {
-  Button,
-  Card,
-  HelperText,
-  Text,
-  TextInput,
-  useTheme,
-} from "react-native-paper";
+import { Button, Card, HelperText, Text, TextInput, useTheme } from "react-native-paper";
 import { useAuth } from "../auth/AuthContext";
 
 const isValidEmail = (email: string) =>
   /^\S+@\S+\.\S+$/.test(email.trim().toLowerCase());
 
-export default function LoginScreen() {
+export default function RegisterScreen() {
   const theme = useTheme();
-  const { login, isLoading, error } = useAuth();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const { register, isLoading, error } = useAuth();
 
-  const [email, setEmail] = useState("test@test.com");
-  const [password, setPassword] = useState("123456");
+  const [name, setName] = useState("Ridho");
+  const [email, setEmail] = useState("ridho@mail.com");
+  const [password, setPassword] = useState("12345678");
   const [showPassword, setShowPassword] = useState(false);
-  const [touched, setTouched] = useState({ email: false, password: false });
+  const [touched, setTouched] = useState({ name: false, email: false, password: false });
 
+  const nameOk = useMemo(() => name.trim().length >= 2, [name]);
   const emailOk = useMemo(() => isValidEmail(email), [email]);
   const passwordOk = useMemo(() => password.length >= 6, [password]);
 
-  const canSubmit = emailOk && passwordOk && !isLoading;
+  const canSubmit = nameOk && emailOk && passwordOk && !isLoading;
 
   const onSubmit = async () => {
-    setTouched({ email: true, password: true });
-    if (!emailOk || !passwordOk) return;
-    await login(email.trim(), password);
+    setTouched({ name: true, email: true, password: true });
+    if (!nameOk || !emailOk || !passwordOk) return;
+    await register(name.trim(), email.trim(), password);
   };
 
   return (
@@ -43,10 +38,7 @@ export default function LoginScreen() {
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
       <View style={styles.container}>
-        <Text
-          variant="headlineMedium"
-          style={{ textAlign: "center", marginBottom: 6 }}
-        >
+        <Text variant="headlineMedium" style={{ textAlign: "center", marginBottom: 6 }}>
           NusanFood
         </Text>
         <Text
@@ -57,11 +49,26 @@ export default function LoginScreen() {
             marginBottom: 18,
           }}
         >
-          Sign in to continue
+          Create your account
         </Text>
 
         <Card mode="elevated" style={styles.card}>
           <Card.Content>
+            <TextInput
+              label="Name"
+              value={name}
+              onChangeText={setName}
+              onBlur={() => setTouched((t) => ({ ...t, name: true }))}
+              autoCapitalize="words"
+              returnKeyType="next"
+              style={styles.input}
+              left={<TextInput.Icon icon="account-outline" />}
+              error={touched.name && !nameOk}
+            />
+            <HelperText type="error" visible={touched.name && !nameOk}>
+              Name must be at least 2 characters.
+            </HelperText>
+
             <TextInput
               label="Email"
               value={email}
@@ -113,32 +120,21 @@ export default function LoginScreen() {
               style={{ marginTop: 12 }}
               contentStyle={{ paddingVertical: 6 }}
             >
-              Sign in
+              Register
             </Button>
 
             <Button
               mode="text"
-              onPress={() => navigation.navigate("Register")}
+              onPress={() => navigation.navigate("Login")}
               disabled={isLoading}
               style={{ marginTop: 8 }}
             >
-              Create an account
-            </Button>
-
-
-            <Button
-              mode="text"
-              onPress={() => {
-                // TODO: navigate to Register / Forgot Password
-              }}
-              style={{ marginTop: 6 }}
-            >
-              Forgot password?
+              Already have an account? Sign in
             </Button>
           </Card.Content>
         </Card>
 
-        {/* <Text
+        <Text
           variant="bodySmall"
           style={{
             marginTop: 12,
@@ -146,8 +142,8 @@ export default function LoginScreen() {
             color: theme.colors.onSurfaceVariant,
           }}
         >
-          Dummy: test@test.com / 123456
-        </Text> */}
+          By continuing, you agree to our Terms & Privacy Policy.
+        </Text>
       </View>
     </KeyboardAvoidingView>
   );

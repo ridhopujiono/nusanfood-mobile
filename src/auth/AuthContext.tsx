@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useMemo, useEffect, useState } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { loginApi } from "../api/auth";
+import { loginApi, registerApi } from "../api/auth";
 
 type User = {
   email: string;
@@ -12,6 +12,7 @@ type AuthContextValue = {
   user: User | null;
   token: string | null;
   login: (email: string, password: string) => Promise<void>;
+  register: (name: string, email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   isLoading: boolean;
   error: string | null;
@@ -63,6 +64,37 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const register = async (name: string, email: string, password: string) => {
+    setError(null);
+    setIsLoading(true);
+
+    try {
+      const res = await registerApi(name.trim(), email.trim(), password);
+
+      // If backend returns token on register -> auto-login
+      const newToken = res.access_token;
+
+      const newUser: User =
+        res.user?.email
+          ? { email: res.user.email, id: res.user.id, name: res.user.name }
+          : { email: email.trim().toLowerCase(), name: name.trim() };
+
+      // Some backends return token, some don’t. Handle both.
+      if (newToken) {
+        setToken(newToken);
+        await AsyncStorage.setItem("token", newToken);
+      }
+
+      setUser(newUser);
+      await AsyncStorage.setItem("user", JSON.stringify(newUser));
+    } catch (e: any) {
+      setError(e?.message ?? "Register failed");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+
   const logout = async () => {
     setToken(null);
     setUser(null);
@@ -71,7 +103,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const value = useMemo(
-    () => ({ user, token, login, logout, isLoading, error }),
+    () => ({ user, token, login, register, logout, isLoading, error }),
     [user, token, isLoading, error]
   );
 
