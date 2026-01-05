@@ -1,71 +1,76 @@
 // src/api/client.ts
+import axios from "axios";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { API_BASE_URL } from "./config";
 
-type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+export const http = axios.create({
+  baseURL: API_BASE_URL,
+  headers: {
+    "Content-Type": "application/json",
+  },
+});
 
-async function getAuthHeader(): Promise<Record<string, string>> {
+// Add token automatically
+http.interceptors.request.use(async (config) => {
   const token = await AsyncStorage.getItem("token");
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
-
-export async function request<T>(
-  path: string,
-  method: HttpMethod,
-  body?: unknown,
-  extraHeaders: Record<string, string> = {}
-): Promise<T> {
-  const authHeader = await getAuthHeader();
-
-  // 🔍 LOG REQUEST
-  console.log("API REQUEST:", {
-    url: `${API_BASE_URL}${path}`,
-    method,
-    body,
-    headers: {
-      "Content-Type": "application/json",
-      ...authHeader,
-      ...extraHeaders,
-    },
-  });
-
-  const res = await fetch(`${API_BASE_URL}${path}`, {
-    method,
-    headers: {
-      "Content-Type": "application/json",
-      ...authHeader,
-      ...extraHeaders,
-    },
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
-
-  const text = await res.text();
-
-  // 🔍 LOG RAW RESPONSE
-  console.log("API RAW RESPONSE:", res.status, text);
-
-  let json: any = null;
-  try {
-    json = text ? JSON.parse(text) : null;
-  } catch {}
-
-  if (!res.ok) {
-    console.log("API PARSED ERROR:", json);
-    const msg =
-      (json && (json.message || json.error)) ||
-      text ||
-      `Request failed (${res.status})`;
-    throw new Error(msg);
+  if (token) {
+    config.headers = config.headers ?? {};
+    config.headers.Authorization = `Bearer ${token}`;
   }
 
-  console.log("API PARSED SUCCESS:", json);
-  return json as T;
-}
+  // Optional logging
+  console.log("API REQUEST:", {
+    url: `${config.baseURL}${config.url}`,
+    method: config.method,
+    data: config.data,
+    headers: config.headers,
+  });
 
+  return config;
+});
 
+// Normalize errors
+http.interceptors.response.use(
+  (response) => {
+    console.log("API RESPONSE:", response.status, response.data);
+    return response;
+  },
+  (error) => {
+    const status = error?.response?.status;
+    const data = error?.response?.data;
+
+    console.log("API ERROR:", status, data ?? error.message);
+
+    const msg =
+      data?.message ||
+      data?.error ||
+      error.message ||
+      (status ? `Request failed (${status})` : "Request failed");
+
+    return Promise.reject(new Error(msg));
+  }
+);
+
+// Keep same interface your app already uses:
 export const api = {
-  get: <T>(path: string, headers?: Record<string, string>) =>
-    request<T>(path, "GET", undefined, headers),
-  post: <T>(path: string, body?: unknown, headers?: Record<string, string>) =>
-    request<T>(path, "POST", body, headers),
+  get: async <T>(path: string, headers?: Record<string, string>) => {
+    const res = await http.get<T>(path, { headers });
+    return res.data;
+  },
+  post: async <T>(path: string, body?: unknown, headers?: Record<string, string>) => {
+    const res = await http.post<T>(path, body, { headers });
+    return res.data;
+  },
+  put: async <T>(path: string, body?: unknown, headers?: Record<string, string>) => {
+    const res = await http.put<T>(path, body, { headers });
+    return res.data;
+  },
+  patch: async <T>(path: string, body?: unknown, headers?: Record<string, string>) => {
+    const res = await http.patch<T>(path, body, { headers });
+    return res.data;
+  },
+  delete: async <T>(path: string, headers?: Record<string, string>) => {
+    const res = await http.delete<T>(path, { headers });
+    return res.data;
+  },
 };

@@ -2,6 +2,8 @@
 import React, { useLayoutEffect, useState, useMemo } from "react"; // add useMemo
 import { Pressable } from "react-native"; // add FlatList, Pressable
 import { ActivityIndicator } from "react-native-paper"; // add
+import { fetchAndCacheFoodsOnce } from "../sync/foodsSync";
+import { searchFoodsByPrefix, countFoods } from "../db/foodsRepo";
 import { useFoodsList } from "../api/queries"; // adjust path if needed
 import { useDebouncedValue } from "../hooks/useDebouncedValue";
 import {
@@ -279,7 +281,7 @@ export default function CreateRecipeScreen() {
   const updateStep = (index: number, value: string) =>
     setRecipeData(s => {
       const newSteps = [...s.steps];
-      newSteps[index] = { instruction: value };
+      newSteps[index] = { ...newSteps[index], instruction: value };
       return { ...s, steps: newSteps };
     });
 
@@ -424,6 +426,7 @@ export default function CreateRecipeScreen() {
           </View>
         )}
 
+        <DebugFoodsCacheButton />
         {currentStep === 3 && (
           <View style={styles.stepContent}>
             <Text variant="headlineSmall" style={{ marginBottom: 8 }}>
@@ -760,30 +763,73 @@ function IngredientNameAutocomplete({
   onChange: (text: string) => void;
 }) {
   const theme = useTheme();
-  const { data, isLoading, error } = useFoodsList();
-
   const [focused, setFocused] = useState(false);
 
   // debounce typing
   const debounced = useDebouncedValue(value, 600);
 
-  // normalize foods list from API response (try common shapes)
-  const foods: FoodItem[] = useMemo(() => {
-    const raw = data?.data ?? data?.foods ?? data?.items ?? data ?? [];
-    return Array.isArray(raw) ? raw : [];
-  }, [data]);
+  const [suggestions, setSuggestions] = useState<FoodItem[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [dbEmpty, setDbEmpty] = useState<boolean | null>(null);
+  const [errMsg, setErrMsg] = useState<string | null>(null);
 
-  const suggestions = useMemo(() => {
+  // Check DB has data (once on mount)
+  React.useEffect(() => {
+    (async () => {
+      try {
+        const c = await countFoods();
+        setDbEmpty(c === 0);
+      } catch (e: any) {
+        setDbEmpty(null);
+      }
+    })();
+  }, []);
+
+  // Query SQLite when debounced changes
+  React.useEffect(() => {
     const q = debounced.trim().toLowerCase();
-    if (q.length < 2) return [];
+    if (!focused || q.length < 2) {
+      setSuggestions([]);
+      setErrMsg(null);
+      return;
+    }
 
-    // simple local filter
-    return foods
-      .filter((f) => (f.name ?? "").toLowerCase().includes(q))
-      .slice(0, 8);
-  }, [foods, debounced]);
+    let cancelled = false;
 
-  const showDropdown = focused && debounced.trim().length >= 2 && suggestions.length > 0;
+    (async () => {
+      try {
+        setLoading(true);
+        setErrMsg(null);
+
+        const rows = await searchFoodsByPrefix(q, 8);
+
+        if (cancelled) return;
+
+        // rows contain raw_json so we can keep your macros display
+        const mapped: FoodItem[] = rows.map((r: any) => {
+          if (r.raw_json) {
+            try {
+              return JSON.parse(r.raw_json);
+            } catch {}
+          }
+          return { id: r.id, name: r.name };
+        });
+
+        setSuggestions(mapped);
+      } catch (e: any) {
+        if (!cancelled) setErrMsg(e?.message ?? "Search failed");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [debounced, focused]);
+
+  const showDropdown =
+    focused && debounced.trim().length >= 2 && suggestions.length > 0;
 
   return (
     <View style={{ position: "relative", flex: 2, marginRight: 8 }}>
@@ -791,17 +837,28 @@ function IngredientNameAutocomplete({
         placeholder="Nama Bahan"
         value={value}
         onChangeText={onChange}
-        onFocus={() => setFocused(true)}
+        onFocus={async () => {
+          setFocused(true);
+          try { setDbEmpty((await countFoods()) === 0); } catch {}
+        }}
         onBlur={() => {
-          // delay so tap on dropdown registers
           setTimeout(() => setFocused(false), 150);
         }}
         style={[styles.input, styles.ingredientName]}
         mode="outlined"
         right={
-          isLoading ? <PaperTextInput.Icon icon={() => <ActivityIndicator />} /> : undefined
+          loading ? (
+            <PaperTextInput.Icon icon={() => <ActivityIndicator />} />
+          ) : undefined
         }
       />
+
+      {/* Helpful hint if DB empty */}
+      {focused && debounced.trim().length >= 2 && dbEmpty ? (
+        <Text style={{ marginTop: 4, opacity: 0.8 }} variant="bodySmall">
+          Foods database is empty. Tap “Fetch foods to SQLite (debug)” first.
+        </Text>
+      ) : null}
 
       {/* Dropdown */}
       {showDropdown ? (
@@ -856,16 +913,58 @@ function IngredientNameAutocomplete({
         </View>
       ) : null}
 
-
       {/* Optional: show error below input */}
-      {focused && debounced.trim().length >= 2 && error ? (
-        <Text style={{ color: theme.colors.error, marginTop: 4 }} variant="bodySmall">
-          {(error as Error).message}
+      {focused && debounced.trim().length >= 2 && errMsg ? (
+        <Text
+          style={{ color: theme.colors.error, marginTop: 4 }}
+          variant="bodySmall"
+        >
+          {errMsg}
         </Text>
       ) : null}
     </View>
   );
 }
+
+
+function DebugFoodsCacheButton() {
+  const [loading, setLoading] = useState(false);
+  const [msg, setMsg] = useState<string>("");
+
+  const onPress = async () => {
+    try {
+      setLoading(true);
+      setMsg("Fetching foods...");
+
+      const result = await fetchAndCacheFoodsOnce({
+        maxPages: 10,
+        perPage: 200,
+        withNutrition: true, // set false if payload too big
+      });
+
+      const total = await countFoods();
+      setMsg(`Cached. Fetched: ${result.totalInserted}. Total in DB: ${total}`);
+    } catch (e: any) {
+      setMsg(`Error: ${e?.message ?? "unknown"}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <View style={{ marginBottom: 12 }}>
+      <Button mode="outlined" onPress={onPress} loading={loading} disabled={loading}>
+        Fetch foods to SQLite (debug)
+      </Button>
+      {msg ? (
+        <Text style={{ marginTop: 6, opacity: 0.8 }} variant="bodySmall">
+          {msg}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
