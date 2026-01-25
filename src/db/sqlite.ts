@@ -18,12 +18,14 @@ export async function getDb(): Promise<SQLiteDatabase> {
     CREATE TABLE IF NOT EXISTS foods (
       id TEXT PRIMARY KEY NOT NULL,
       name TEXT NOT NULL,
+      name_id TEXT,
       raw_json TEXT,
       updated_at INTEGER
     );
   `);
 
   await db.executeSql(`CREATE INDEX IF NOT EXISTS idx_foods_name ON foods(name);`);
+  await db.executeSql(`CREATE INDEX IF NOT EXISTS idx_foods_name_id ON foods(name_id);`);
 
   await db.executeSql(`
     CREATE TABLE IF NOT EXISTS meta (

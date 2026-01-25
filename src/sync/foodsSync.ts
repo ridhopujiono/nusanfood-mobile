@@ -46,6 +46,7 @@ export async function fetchAndCacheFoodsOnce(options?: {
         foods.map((f: any) => ({
             id: String(f.id),              // <--- IMPORTANT
             name: String(f.name ?? "").trim(),
+            name_id: String(f?.name_id ?? "").trim(),
             raw_json: JSON.stringify(f),
             updated_at: Date.now(),
         }))
