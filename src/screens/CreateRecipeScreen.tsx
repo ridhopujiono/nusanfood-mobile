@@ -1,11 +1,11 @@
 // src/screens/CreateRecipeScreen.tsx
-import React, { useLayoutEffect, useState, useMemo } from "react"; // add useMemo
-import { Pressable } from "react-native"; // add FlatList, Pressable
-import { ActivityIndicator } from "react-native-paper"; // add
-import { fetchAndCacheFoodsOnce } from "../sync/foodsSync";
-import { searchFoodsByPrefix, countFoods } from "../db/foodsRepo";
-import { useFoodsList } from "../api/queries"; // adjust path if needed
-import { useDebouncedValue } from "../hooks/useDebouncedValue";
+import React, { useLayoutEffect, useState, useMemo } from 'react'; // add useMemo
+import { Pressable } from 'react-native'; // add FlatList, Pressable
+import { ActivityIndicator, Menu } from 'react-native-paper'; // add
+import { fetchAndCacheFoodsOnce } from '../sync/foodsSync';
+import { searchFoodsByPrefix, countFoods } from '../db/foodsRepo';
+import { useFoodsList } from '../api/queries'; // adjust path if needed
+import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import {
   View,
   StyleSheet,
@@ -16,6 +16,7 @@ import {
   Platform,
   PermissionsAndroid,
   TouchableOpacity,
+  FlatList,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
@@ -38,6 +39,8 @@ import {
   CameraOptions,
   Asset,
 } from 'react-native-image-picker';
+import { IngredientNameAutocomplete } from '../components/foods/IngredientNameAutocomplete';
+import UnitSelector from '../components/foods/UnitSelector';
 
 const { width } = Dimensions.get('window');
 
@@ -47,6 +50,7 @@ interface Ingredient {
   name: string;
   quantity: string;
   unit: string;
+  availableUnits?: string[];
 }
 
 interface RecipeStep {
@@ -244,6 +248,16 @@ export default function CreateRecipeScreen() {
       Alert.alert('Error', 'Could not open camera');
     }
   };
+
+  const updateMultipleIngredientFields = (
+    index: number,
+    fields: Partial<Ingredient>,
+  ) =>
+    setRecipeData(s => {
+      const newIngredients = [...s.ingredients];
+      newIngredients[index] = { ...newIngredients[index], ...fields };
+      return { ...s, ingredients: newIngredients };
+    });
 
   // existing form helpers (ingredients/steps)
   const addIngredient = () =>
@@ -447,23 +461,44 @@ export default function CreateRecipeScreen() {
                 <View style={styles.ingredientInputs}>
                   <IngredientNameAutocomplete
                     value={ingredient.name}
-                    onChange={(t) => updateIngredient(index, "name", t)}
+                    // Tidak perlu onChange manual, karena update logic ada di onSelect di bawah
+                    onChange={val => {
+                      /* Opsional: biarkan kosong jika update via onSelect */
+                    }}
+                    onSelect={item => {
+                      // Logika pengisian unit otomatis
+                      const labels = item?.servings?.map(
+                        (s: any) =>
+                          s.household_unit_id ?? s.household_unit,
+                      ) || ['g'];
+
+                      const defaultServing = pickServing(item);
+                      const defaultLabel =
+                        defaultServing?.household_unit_id ??
+                        defaultServing?.household_unit;
+
+                      // Update state parent (recipeData)
+                      updateMultipleIngredientFields(index, {
+                        name: item.name_id ?? item.name ?? '',
+                        unit: defaultLabel,
+                        availableUnits: labels,
+                      });
+                    }}
                   />
 
                   <PaperTextInput
                     placeholder="Jumlah"
+                    label="Jumlah"
                     value={ingredient.quantity}
                     onChangeText={t => updateIngredient(index, 'quantity', t)}
                     style={[styles.input, styles.ingredientQuantity]}
                     mode="outlined"
                     keyboardType="numeric"
                   />
-                  <PaperTextInput
-                    placeholder="g"
+                  <UnitSelector
                     value={ingredient.unit}
-                    onChangeText={t => updateIngredient(index, 'unit', t)}
-                    style={[styles.input, styles.ingredientUnit]}
-                    mode="outlined"
+                    options={ingredient.availableUnits}
+                    onSelect={(val) => updateIngredient(index, 'unit', val)}
                   />
                 </View>
 
@@ -732,6 +767,7 @@ function TouchableCard({
 type FoodItem = {
   id?: number | string;
   name?: string;
+  name_id?: string;
   // add other fields if your API uses different naming
 };
 
@@ -740,14 +776,15 @@ function pickServing(food: any) {
   if (!Array.isArray(servings) || servings.length === 0) return null;
 
   const by100g = servings.find(
-    (s) => String(s?.serving_label).toLowerCase() === "100 g"
+    s =>
+      String(s?.serving_label_id ?? s?.serving_label).toLowerCase() === '100 g',
   );
 
   return by100g ?? servings[0];
 }
 
 function formatMacros(nutrition: any) {
-  if (!nutrition) return "";
+  if (!nutrition) return '';
   const c = nutrition.calories ?? 0;
   const p = nutrition.protein ?? 0;
   const carb = nutrition.carbohydrate ?? 0;
@@ -755,186 +792,14 @@ function formatMacros(nutrition: any) {
   return `${c} kcal • P ${p}g • C ${carb}g • F ${f}g`;
 }
 
-function IngredientNameAutocomplete({
-  value,
-  onChange,
-}: {
-  value: string;
-  onChange: (text: string) => void;
-}) {
-  const theme = useTheme();
-  const [focused, setFocused] = useState(false);
-
-  // debounce typing
-  const debounced = useDebouncedValue(value, 600);
-
-  const [suggestions, setSuggestions] = useState<FoodItem[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [dbEmpty, setDbEmpty] = useState<boolean | null>(null);
-  const [errMsg, setErrMsg] = useState<string | null>(null);
-
-  // Check DB has data (once on mount)
-  React.useEffect(() => {
-    (async () => {
-      try {
-        const c = await countFoods();
-        setDbEmpty(c === 0);
-      } catch (e: any) {
-        setDbEmpty(null);
-      }
-    })();
-  }, []);
-
-  // Query SQLite when debounced changes
-  React.useEffect(() => {
-    const q = debounced.trim().toLowerCase();
-    if (!focused || q.length < 2) {
-      setSuggestions([]);
-      setErrMsg(null);
-      return;
-    }
-
-    let cancelled = false;
-
-    (async () => {
-      try {
-        setLoading(true);
-        setErrMsg(null);
-
-        const rows = await searchFoodsByPrefix(q, 8);
-
-        if (cancelled) return;
-
-        // rows contain raw_json so we can keep your macros display
-        const mapped: FoodItem[] = rows.map((r: any) => {
-          if (r.raw_json) {
-            try {
-              return JSON.parse(r.raw_json);
-            } catch {}
-          }
-          return { id: r.id, name: r.name };
-        });
-
-        setSuggestions(mapped);
-      } catch (e: any) {
-        if (!cancelled) setErrMsg(e?.message ?? "Search failed");
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [debounced, focused]);
-
-  const showDropdown =
-    focused && debounced.trim().length >= 2 && suggestions.length > 0;
-
-  return (
-    <View style={{ position: "relative", flex: 2, marginRight: 8 }}>
-      <PaperTextInput
-        placeholder="Nama Bahan"
-        value={value}
-        onChangeText={onChange}
-        onFocus={async () => {
-          setFocused(true);
-          try { setDbEmpty((await countFoods()) === 0); } catch {}
-        }}
-        onBlur={() => {
-          setTimeout(() => setFocused(false), 150);
-        }}
-        style={[styles.input, styles.ingredientName]}
-        mode="outlined"
-        right={
-          loading ? (
-            <PaperTextInput.Icon icon={() => <ActivityIndicator />} />
-          ) : undefined
-        }
-      />
-
-      {/* Helpful hint if DB empty */}
-      {focused && debounced.trim().length >= 2 && dbEmpty ? (
-        <Text style={{ marginTop: 4, opacity: 0.8 }} variant="bodySmall">
-          Foods database is empty. Tap “Fetch foods to SQLite (debug)” first.
-        </Text>
-      ) : null}
-
-      {/* Dropdown */}
-      {showDropdown ? (
-        <View
-          style={[
-            styles.suggestBox,
-            {
-              backgroundColor: theme.colors.surface,
-              borderColor: theme.colors.outlineVariant ?? "#ddd",
-            },
-          ]}
-        >
-          <ScrollView
-            keyboardShouldPersistTaps="handled"
-            nestedScrollEnabled
-            style={{ maxHeight: 220 }}
-          >
-            {suggestions.map((item, idx) => {
-              const serving = pickServing(item);
-              const nutrition = serving?.nutrition;
-              const servingLabel = serving?.serving_label ?? "";
-              const macros = formatMacros(nutrition);
-
-              return (
-                <Pressable
-                  key={String(item.id ?? idx)}
-                  onPress={() => {
-                    onChange(item.name ?? "");
-                    setFocused(false);
-                  }}
-                  style={styles.suggestItem}
-                >
-                  <Text variant="bodyLarge" style={{ fontWeight: "600" }}>
-                    {item.name ?? "Unnamed"}
-                  </Text>
-
-                  {servingLabel ? (
-                    <Text variant="bodySmall" style={{ opacity: 0.7 }}>
-                      {servingLabel}
-                    </Text>
-                  ) : null}
-
-                  {macros ? (
-                    <Text variant="bodySmall" style={{ opacity: 0.7 }}>
-                      {macros}
-                    </Text>
-                  ) : null}
-                </Pressable>
-              );
-            })}
-          </ScrollView>
-        </View>
-      ) : null}
-
-      {/* Optional: show error below input */}
-      {focused && debounced.trim().length >= 2 && errMsg ? (
-        <Text
-          style={{ color: theme.colors.error, marginTop: 4 }}
-          variant="bodySmall"
-        >
-          {errMsg}
-        </Text>
-      ) : null}
-    </View>
-  );
-}
-
-
 function DebugFoodsCacheButton() {
   const [loading, setLoading] = useState(false);
-  const [msg, setMsg] = useState<string>("");
+  const [msg, setMsg] = useState<string>('');
 
   const onPress = async () => {
     try {
       setLoading(true);
-      setMsg("Fetching foods...");
+      setMsg('Fetching foods...');
 
       const result = await fetchAndCacheFoodsOnce({
         maxPages: 10,
@@ -945,7 +810,7 @@ function DebugFoodsCacheButton() {
       const total = await countFoods();
       setMsg(`Cached. Fetched: ${result.totalInserted}. Total in DB: ${total}`);
     } catch (e: any) {
-      setMsg(`Error: ${e?.message ?? "unknown"}`);
+      setMsg(`Error: ${e?.message ?? 'unknown'}`);
     } finally {
       setLoading(false);
     }
@@ -953,7 +818,12 @@ function DebugFoodsCacheButton() {
 
   return (
     <View style={{ marginBottom: 12 }}>
-      <Button mode="outlined" onPress={onPress} loading={loading} disabled={loading}>
+      <Button
+        mode="outlined"
+        onPress={onPress}
+        loading={loading}
+        disabled={loading}
+      >
         Fetch foods to SQLite (debug)
       </Button>
       {msg ? (
@@ -964,7 +834,6 @@ function DebugFoodsCacheButton() {
     </View>
   );
 }
-
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
@@ -1032,14 +901,14 @@ const styles = StyleSheet.create({
   stepNumberText: { color: '#fff' },
   stepInputContainer: { flex: 1 },
   suggestBox: {
-    position: "absolute",
+    position: 'absolute',
     left: 0,
     right: 0,
-    top: 60,        // adjust if your input height differs
+    top: 60, // adjust if your input height differs
     maxHeight: 220,
     borderWidth: 1,
     borderRadius: 12,
-    overflow: "hidden",
+    overflow: 'hidden',
     elevation: 6,
     zIndex: 9999,
   },
@@ -1047,7 +916,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 12,
     borderBottomWidth: 1,
-    borderBottomColor: "rgba(0,0,0,0.06)",
+    borderBottomColor: 'rgba(0,0,0,0.06)',
   },
   previewCard: { borderRadius: 8, overflow: 'hidden', marginTop: 8 },
   previewImage: { width: '100%', height: 220 },

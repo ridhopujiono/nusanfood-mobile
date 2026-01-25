@@ -3,6 +3,7 @@ import { getDb } from "./sqlite";
 export type FoodRow = {
   id: string;
   name: string;
+  name_id?: string | null;
   raw_json?: string | null;
   updated_at?: number | null;
 };
@@ -16,9 +17,9 @@ export async function upsertFoods(rows: FoodRow[]) {
   await db.transaction((tx) => {
     for (const r of rows) {
       tx.executeSql(
-        `INSERT OR REPLACE INTO foods (id, name, raw_json, updated_at)
-         VALUES (?, ?, ?, ?);`,
-        [r.id, r.name, r.raw_json ?? null, r.updated_at ?? null]
+        `INSERT OR REPLACE INTO foods (id, name, name_id, raw_json, updated_at)
+         VALUES (?, ?, ?, ?, ?);`,
+        [r.id, r.name, r?.name_id ?? null, r.raw_json ?? null, r.updated_at ?? null]
       );
     }
   });
@@ -36,9 +37,9 @@ export async function searchFoodsByPrefix(query: string, limit = 20) {
   if (q.length === 0) return [];
 
   const [res] = await db.executeSql(
-    `SELECT id, name, raw_json, updated_at
+    `SELECT id, name, name_id, raw_json, updated_at
      FROM foods
-     WHERE LOWER(name) LIKE ?
+     WHERE LOWER(name_id) LIKE ?
      ORDER BY name ASC
      LIMIT ?;`,
     [`${q}%`, limit]
